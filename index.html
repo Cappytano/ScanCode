@@ -11,7 +11,7 @@
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <link rel="preload" href="styles.css" as="style">
   <link rel="stylesheet" href="styles.css">
-  <meta name="description" content="Fast, reliable barcode + OCR web scanner for Windows 11.">
+  <meta name="description" content="Fast, reliable barcode + OCR web scanner with scale integration (BLE/USB HID).">
 </head>
 <body>
 <header class="topbar">
@@ -19,8 +19,8 @@
   <div class="pills">
     <span id="pill-engine" class="pill" title="Active decode engine">Engine: —</span>
     <span id="pill-perm" class="pill" title="Camera permission">Perm: —</span>
-    <span id="pill-ocr" class="pill" title="OCR status">OCR: —</span>
-    <span id="pill-autolog" class="pill" title="Auto logging mode">Auto‑log: On</span>
+    <span id="pill-ocr" class="pill" title="Weight/OCR status">Weight: —</span>
+    <span id="pill-autolog" class="pill" title="Auto logging mode">Auto-log: On</span>
   </div>
 </header>
 
@@ -48,7 +48,7 @@
         <input id="delay" type="number" min="0" max="4" step="0.5" value="1.5" title="Delay before snapshot/OCR after scan">
       </label>
       <label>
-        <span>Scale Mode</span>
+        <span>Processing Scale</span>
         <select id="scaleMode" title="Processing resolution">
           <option value="auto">Auto</option>
           <option value="1080">≤1080w</option>
@@ -61,6 +61,25 @@
         <span>Focus</span>
         <input id="focusSlider" type="range" min="0" max="1000" step="1" value="500" title="Manual focus">
       </label>
+
+      <!-- Weight source + controls -->
+      <label>
+        <span>Weight Source</span>
+        <select id="weightSource" title="Choose how to capture weight">
+          <option value="ocr" selected>OCR (camera)</option>
+          <option value="bluetooth">Bluetooth Scale (BLE)</option>
+          <option value="hid">USB Scale (HID)</option>
+        </select>
+      </label>
+      <div class="btns">
+        <button id="btnConnectScale" type="button" title="Connect to selected scale source">Connect Scale</button>
+        <label class="switch">
+          <input id="showROI" type="checkbox" checked>
+          <span>Show OCR Box</span>
+        </label>
+      </div>
+
+      <!-- Run tests -->
       <div class="btns">
         <button id="btnPerm" type="button" title="Request camera permission">Request Permission</button>
         <button id="btnRefresh" type="button" title="Refresh camera list">Refresh Cameras</button>
@@ -70,13 +89,17 @@
       <div class="btns">
         <label class="switch">
           <input id="autoLog" type="checkbox" checked>
-          <span>Auto‑logging</span>
+          <span>Auto-logging</span>
         </label>
-        <button id="btnSnapshot" type="button" title="Capture single frame and log (when Auto‑log is OFF)">Snapshot</button>
+        <button id="btnSnapshot" type="button" title="Capture single frame and log (when Auto-log is OFF)">Snapshot</button>
         <label class="switch">
           <input id="toggleOCR" type="checkbox" checked>
           <span>OCR Weight</span>
         </label>
+      </div>
+      <div class="btns">
+        <button id="btnTestEng" type="button" title="Run scanning engine diagnostics">Test Engines</button>
+        <button id="btnTestOCR" type="button" title="Run OCR diagnostics">Test OCR</button>
       </div>
     </div>
   </section>

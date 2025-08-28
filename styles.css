@@ -65,6 +65,7 @@ button:disabled{opacity:.6; cursor:not-allowed}
 .filelabel input{display:none}
 .switch{display:inline-flex; align-items:center; gap:.5rem}
 .switch input{accent-color:var(--accent)}
+.hidden{display:none}
 
 .preview .video-wrap{
   position:relative; width:100%; max-width:100%;
@@ -82,7 +83,8 @@ tbody tr:hover{background:#121219}
 .toast{
   position:fixed; right:1rem; bottom:1rem; background:var(--elev);
   border:1px solid var(--border); padding:.6rem .8rem; border-radius:.6rem;
-  opacity:0; transform:translateY(10px); transition:.2s; pointer-events:none
+  opacity:0; transform:translateY(10px); transition:.2s; pointer-events:none;
+  white-space:pre-line;
 }
 .toast.show{opacity:1; transform:translateY(0)}
 

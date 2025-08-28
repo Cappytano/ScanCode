@@ -1,5 +1,5 @@
 /* very small passthrough service worker */
-const CACHE = 'scancode-v1';
+const CACHE = 'scancode-v2';
 const CORE = [
   './',
   './index.html',

@@ -1,4 +1,4 @@
-/* ScanCode main script (ES5) */
+/* ScanCode main script (ES5) - updated with scale sources, diagnostics, and ROI toggle */
 (function(){
   'use strict';
 
@@ -22,6 +22,10 @@
   var focusWrap = document.getElementById('focusWrap');
   var focusSlider = document.getElementById('focusSlider');
 
+  var weightSource = document.getElementById('weightSource');
+  var btnConnectScale = document.getElementById('btnConnectScale');
+  var showROI = document.getElementById('showROI');
+
   var btnPerm = document.getElementById('btnPerm');
   var btnRefresh = document.getElementById('btnRefresh');
   var btnStart = document.getElementById('btnStart');
@@ -31,6 +35,8 @@
   var btnSnapshot = document.getElementById('btnSnapshot');
   var btnRoiReset = document.getElementById('btnRoiReset');
   var btnClear = document.getElementById('btnClear');
+  var btnTestEng = document.getElementById('btnTestEng');
+  var btnTestOCR = document.getElementById('btnTestOCR');
 
   var importCSV = document.getElementById('importCSV');
   var importXLSX = document.getElementById('importXLSX');
@@ -52,7 +58,6 @@
     engine: '—',
     cooldownMs: 5000,
     scanTimer: null,
-    cooldownTimer: null,
     scanning: false,
     lastScanAt: 0,
     rows: [],
@@ -60,13 +65,16 @@
     nextRowId: 1,
     roi: { x: 0.6, y: 0.6, w: 0.35, h: 0.25 }, // normalized
     roiDragging: null,
-    roiDirty: true,
     ocrReady: false,
     ocrWorker: null,
     ocrWords: [],
-    overlayPulse: 0,
     autolog: true,
     wantOcr: true,
+    showROI: true,
+    weightSource: 'ocr',
+    lastWeightGrams: null,
+    bt: { device:null, server:null, char:null },
+    hid: { device:null },
     focusSupported: false,
     focusMin: 0, focusMax: 1000, focusStep: 1
   };
@@ -82,6 +90,8 @@
         if(typeof p.cooldownMs === 'number'){ state.cooldownMs = p.cooldownMs; cooldownInput.value = Math.round(state.cooldownMs/1000); }
         if(typeof p.roi === 'object'){ state.roi = p.roi; }
         if(typeof p.scaleMode === 'string'){ scaleMode.value = p.scaleMode; }
+        if(typeof p.weightSource === 'string'){ state.weightSource = p.weightSource; }
+        if(typeof p.showROI === 'boolean'){ state.showROI = p.showROI; showROI.checked = state.showROI; }
       }
       var d = localStorage.getItem('scancode_data');
       if(d){
@@ -91,6 +101,7 @@
       }
     }catch(e){ console.warn('prefs/data load', e); }
     updateAutoPill();
+    updateWeightPill();
     renderRows();
   }
   function savePrefs(){
@@ -100,7 +111,9 @@
         wantOcr: state.wantOcr,
         cooldownMs: state.cooldownMs,
         roi: state.roi,
-        scaleMode: scaleMode.value
+        scaleMode: scaleMode.value,
+        weightSource: state.weightSource,
+        showROI: state.showROI
       }));
     }catch(e){}
   }
@@ -113,7 +126,7 @@
   function toast(msg){
     toastEl.textContent = msg;
     toastEl.classList.add('show');
-    setTimeout(function(){ toastEl.classList.remove('show'); }, 1800);
+    setTimeout(function(){ toastEl.classList.remove('show'); }, 2000);
   }
 
   function setPill(el, text, cls){
@@ -122,7 +135,21 @@
   }
 
   function updateAutoPill(){
-    setPill(pillAuto, 'Auto‑log: ' + (state.autolog ? 'On' : 'Off'), state.autolog ? 'ok' : 'warn');
+    setPill(pillAuto, 'Auto-log: ' + (state.autolog ? 'On' : 'Off'), state.autolog ? 'ok' : 'warn');
+  }
+  function updateWeightPill(){
+    var mode = state.weightSource || 'ocr';
+    if(mode==='ocr'){
+      setPill(pillOCR, state.ocrReady ? 'Weight: OCR Ready' : 'Weight: OCR', state.ocrReady ? 'ok' : 'warn');
+    }else if(mode==='bluetooth'){
+      var ok = !!(state.bt && state.bt.char);
+      setPill(pillOCR, ok ? 'Weight: BT Connected' : 'Weight: BT', ok ? 'ok' : 'warn');
+    }else if(mode==='hid'){
+      var ok2 = !!(state.hid && state.hid.device && state.hid.device.opened);
+      setPill(pillOCR, ok2 ? 'Weight: USB HID Connected' : 'Weight: USB HID', ok2 ? 'ok' : 'warn');
+    }else{
+      setPill(pillOCR, 'Weight: —', 'bad');
+    }
   }
 
   // --------- Permissions & Devices ---------
@@ -136,7 +163,6 @@
 
   function requestPermission(){
     navigator.mediaDevices.getUserMedia({ video: true, audio: false }).then(function(stream){
-      // stop immediately; just to unlock enumerateDevices
       stream.getTracks().forEach(function(t){ t.stop(); });
       enumerateCams();
       checkPermission();
@@ -195,9 +221,7 @@
 
   function stopStream(){
     if(state.scanTimer){ clearTimeout(state.scanTimer); state.scanTimer = null; }
-    if(state.stream){
-      state.stream.getTracks().forEach(function(t){ t.stop(); });
-    }
+    if(state.stream){ state.stream.getTracks().forEach(function(t){ t.stop(); }); }
     state.stream = null; state.track = null; state.scanning = false;
   }
 
@@ -213,31 +237,24 @@
 
   // --------- Focus UI ---------
   function setupFocusUI(){
-    // Default hide
     focusWrap.classList.add('hidden');
     state.focusSupported = false;
     if(!state.track || !state.track.getCapabilities){ return; }
     var caps;
     try{ caps = state.track.getCapabilities(); }catch(e){ return; }
-    // focusDistance is more widely used; also focusMode array may exist
     var hasRange = caps.focusDistance && typeof caps.focusDistance.min === 'number' && typeof caps.focusDistance.max === 'number';
     var modes = caps.focusMode && (caps.focusMode.indexOf ? caps.focusMode : []);
     var manualOK = (modes && modes.indexOf && modes.indexOf('manual') !== -1) || hasRange;
-
     if(manualOK){
       state.focusSupported = true;
       var min = hasRange ? caps.focusDistance.min : 0;
       var max = hasRange ? caps.focusDistance.max : 1000;
       var step = hasRange ? (caps.focusDistance.step || 1) : 1;
       state.focusMin = min; state.focusMax = max; state.focusStep = step;
-      focusSlider.min = String(0);
-      focusSlider.max = String(1000);
-      focusSlider.step = String(1);
-      // restore last value per device
+      focusSlider.min = String(0); focusSlider.max = String(1000); focusSlider.step = String(1);
       var key = 'scancode_focus_' + (state.deviceId || 'default');
       var saved = localStorage.getItem(key);
-      var val = saved ? Number(saved) : 500;
-      if(!(val>=0 && val<=1000)) val = 500;
+      var val = saved ? Number(saved) : 500; if(!(val>=0 && val<=1000)) val = 500;
       focusSlider.value = String(val);
       focusWrap.classList.remove('hidden');
       focusSlider.oninput = function(){
@@ -246,11 +263,9 @@
         applyFocus(fval);
         try{ localStorage.setItem(key, String(focusSlider.value)); }catch(e){}
       };
-      // apply initial value softly
       setTimeout(function(){ focusSlider.oninput(); }, 100);
     }
   }
-
   function applyFocus(dist){
     if(!state.track || !state.track.applyConstraints){ return; }
     state.track.applyConstraints({ advanced: [ { focusMode: 'manual', focusDistance: dist } ] })
@@ -264,7 +279,6 @@
     overlay.height = video.clientHeight || video.videoHeight || 720;
     work.width = video.videoWidth || 1280;
     work.height = video.videoHeight || 720;
-    state.roiDirty = true;
   }
   function sizeOverlayOnce(){ sizeOverlay(); }
 
@@ -282,37 +296,38 @@
     var w = overlay.width, h = overlay.height;
     ctx.clearRect(0,0,w,h);
 
-    // OCR ROI (dashed green when has words)
-    var rr = roiRectPx();
-    ctx.save();
-    ctx.setLineDash([6,4]);
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(0,255,0,0.9)';
-    ctx.fillStyle = state.ocrWords && state.ocrWords.length ? 'rgba(0,255,0,0.12)' : 'rgba(0,0,0,0.12)';
-    ctx.strokeRect(rr.x, rr.y, rr.w, rr.h);
-    ctx.fillRect(rr.x, rr.y, rr.w, rr.h);
-    ctx.restore();
+    if(state.showROI){
+      // OCR ROI
+      var rr = roiRectPx();
+      ctx.save();
+      ctx.setLineDash([6,4]);
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(0,255,0,0.9)';
+      ctx.fillStyle = state.ocrWords && state.ocrWords.length ? 'rgba(0,255,0,0.12)' : 'rgba(0,0,0,0.12)';
+      ctx.strokeRect(rr.x, rr.y, rr.w, rr.h);
+      ctx.fillRect(rr.x, rr.y, rr.w, rr.h);
+      ctx.restore();
 
-    // ROI handle (bottom-right)
-    ctx.save();
-    ctx.fillStyle = '#00ff77';
-    ctx.fillRect(rr.x + rr.w - 10, rr.y + rr.h - 10, 10, 10);
-    ctx.restore();
+      // ROI handle (bottom-right)
+      ctx.save();
+      ctx.fillStyle = '#00ff77';
+      ctx.fillRect(rr.x + rr.w - 10, rr.y + rr.h - 10, 10, 10);
+      ctx.restore();
+    }
 
     // OCR word boxes
-    if(state.ocrWords && state.ocrWords.length){
+    if(state.showROI && state.ocrWords && state.ocrWords.length){
       ctx.save();
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(255,0,0,0.9)';
       for(var i=0;i<state.ocrWords.length;i++){
-        var b = state.ocrWords[i].bbox; // in overlay coords
-        if(!b) continue;
+        var b = state.ocrWords[i].bbox; if(!b) continue;
         ctx.strokeRect(b.x, b.y, b.w, b.h);
       }
       ctx.restore();
     }
 
-    // Scannable polygons (from engines)
+    // Scannable polygons
     if(scanPolys && scanPolys.length){
       ctx.save();
       ctx.setLineDash([]);
@@ -332,9 +347,10 @@
     }
   }
 
-  // ROI interactions (drag/resize) - mouse + touch
+  // ROI interactions (drag/resize)
   function within(x,y,rect){ return x>=rect.x && y>=rect.y && x<=rect.x+rect.w && y<=rect.y+rect.h; }
   function onPointerDown(ev){
+    if(!state.showROI) return;
     var rect = overlay.getBoundingClientRect();
     var x = (ev.clientX || (ev.touches && ev.touches[0].clientX) || 0) - rect.left;
     var y = (ev.clientY || (ev.touches && ev.touches[0].clientY) || 0) - rect.top;
@@ -349,7 +365,7 @@
     }
   }
   function onPointerMove(ev){
-    if(!state.roiDragging) return;
+    if(!state.roiDragging || !state.showROI) return;
     ev.preventDefault();
     var rect = overlay.getBoundingClientRect();
     var x = (ev.clientX || (ev.touches && ev.touches[0].clientX) || 0) - rect.left;
@@ -389,7 +405,6 @@
   var haveBD = ('BarcodeDetector' in window);
   var haveZX = (typeof window.ZXingBrowser !== 'undefined' || typeof window.ZXing !== 'undefined');
   var haveJsQR = (typeof window.jsQR !== 'undefined');
-  var engineStep = 0; // 0 BD, 1 ZX, 2 jsQR
 
   function updateEngineAvailability(){
     haveBD = ('BarcodeDetector' in window);
@@ -403,78 +418,36 @@
   }
 
   function frameToImageData(targetW){
-    // draw current video frame into work canvas and return ImageData
     var vw = video.videoWidth || work.width, vh = video.videoHeight || work.height;
     if(!vw || !vh) return null;
-    // scale
     var maxW = targetW || vw;
-    if(scaleMode.value && scaleMode.value !== 'auto'){
-      maxW = Math.min(maxW, parseInt(scaleMode.value,10));
-    }
+    if(scaleMode.value && scaleMode.value !== 'auto'){ maxW = Math.min(maxW, parseInt(scaleMode.value,10)); }
     var w = Math.min(vw, maxW);
     var h = Math.round(vh * (w / vw));
     work.width = w; work.height = h;
     try{
       wctx.drawImage(video, 0, 0, w, h);
       return wctx.getImageData(0,0,w,h);
-    }catch(e){
-      return null;
-    }
+    }catch(e){ return null; }
   }
 
-  function scheduleCooldown(){
-    state.lastScanAt = Date.now();
-  }
-
-  function inCooldown(){
-    var cd = state.cooldownMs;
-    return (Date.now() - state.lastScanAt) < cd;
-  }
-
-  function scanLoopSchedule(ms){
-    if(state.scanTimer){ clearTimeout(state.scanTimer); }
-    state.scanTimer = setTimeout(scanLoop, ms||150);
-  }
+  function scheduleCooldown(){ state.lastScanAt = Date.now(); }
+  function inCooldown(){ return (Date.now() - state.lastScanAt) < state.cooldownMs; }
+  function scanLoopSchedule(ms){ if(state.scanTimer){ clearTimeout(state.scanTimer); } state.scanTimer = setTimeout(scanLoop, ms||150); }
 
   function scanLoop(){
     if(!state.scanning){ return; }
     updateEngineAvailability();
-    var polys = []; // to draw
-    // Draw overlay baseline (ROI + prev words)
+    var polys = [];
     drawOverlayBoxes(null);
 
-    // Skip decode during cooldown but keep overlays/ocr words refreshing lightly
     if(inCooldown() && state.autolog){
-      // light OCR pulse for ROI feedback
-      ocrPulse(false, null);
       return scanLoopSchedule(160);
     }
 
-    // Cascade
-    if(haveBD){
-      tryBD(polys, function(hit){ 
-        if(hit){ handleDetection(hit, 'BD', hit.polygon || null); }
-        drawOverlayBoxes(polys); 
-        scanLoopSchedule(180);
-      });
-      return;
-    }
-    if(haveZX){
-      tryZX(polys, function(hit){
-        if(hit){ handleDetection(hit, 'ZXing', hit.polygon || null); }
-        drawOverlayBoxes(polys);
-        scanLoopSchedule(220);
-      });
-      return;
-    }
-    if(haveJsQR){
-      tryJsQR(polys, function(hit){
-        if(hit){ handleDetection(hit, 'jsQR', hit.polygon || null); }
-        drawOverlayBoxes(polys);
-        scanLoopSchedule(220);
-      });
-      return;
-    }
+    if(haveBD){ tryBD(polys, function(hit){ if(hit){ handleDetection(hit, 'BD', hit.polygon || null); } drawOverlayBoxes(polys); scanLoopSchedule(180); }); return; }
+    if(haveZX){ tryZX(polys, function(hit){ if(hit){ handleDetection(hit, 'ZXing', hit.polygon || null); } drawOverlayBoxes(polys); scanLoopSchedule(220); }); return; }
+    if(haveJsQR){ tryJsQR(polys, function(hit){ if(hit){ handleDetection(hit, 'jsQR', hit.polygon || null); } drawOverlayBoxes(polys); scanLoopSchedule(220); }); return; }
     setEnginePill('None');
     scanLoopSchedule(300);
   }
@@ -484,34 +457,28 @@
     var fmts = (window.BarcodeDetector && window.BarcodeDetector.getSupportedFormats) ? window.BarcodeDetector.getSupportedFormats() : null;
     try{
       var det = fmts ? new window.BarcodeDetector({ formats: fmts }) : new window.BarcodeDetector();
-      // use ImageBitmap for speed if available
       var vw = video.videoWidth, vh = video.videoHeight;
       if(!vw || !vh) return cb(null);
-      createImageBitmap(video).then(function(bitmap){
-        return det.detect(bitmap);
-      }).then(function(list){
+      createImageBitmap(video).then(function(bitmap){ return det.detect(bitmap); })
+      .then(function(list){
         if(list && list.length){
           var b = list[0];
           if(b.cornerPoints && b.cornerPoints.length){
-            var w = overlay.width, h = overlay.height;
             var poly = [];
             for(var i=0;i<b.cornerPoints.length;i++){
               var pt = b.cornerPoints[i];
-              poly.push({ x: pt.x/(video.videoWidth||w), y: pt.y/(video.videoHeight||h) });
+              poly.push({ x: pt.x/(video.videoWidth||overlay.width), y: pt.y/(video.videoHeight||overlay.height) });
             }
             polys.push(poly);
           }
           cb({ text: b.rawValue || b.rawValue, format: b.format || 'unknown', polygon: polys[0] || null, source:'camera' });
-        }else{
-          cb(null);
-        }
+        }else cb(null);
       })['catch'](function(){ cb(null); });
     }catch(e){ cb(null); }
   }
 
   function tryZX(polys, cb){
     setEnginePill('ZXing');
-    // We support two globals: ZXingBrowser.readBarcodesFromImageData OR ZXing().
     var id = frameToImageData(1024);
     if(!id){ return cb(null); }
     var reader = (window.ZXingBrowser && window.ZXingBrowser) || (window.ZXing && window.ZXing);
@@ -528,7 +495,6 @@
       })['catch'](function(){ cb(null); });
       return;
     }
-    // Fallback to generic decode(data,w,h) if exposed
     if(reader && reader.decode){
       try{
         var decoded = reader.decode(id.data, id.width, id.height);
@@ -581,9 +547,7 @@
     };
 
     if(state.autolog){
-      // dedup: only log first time
       if(state.seen[key]){
-        // bumped count only
         state.seen[key] = count;
         bumpRowCountByKey(key, count);
         scheduleCooldown();
@@ -592,18 +556,12 @@
       state.seen[key] = count;
       addRow(row, key);
       scheduleCooldown();
-      // delayed weight + photo
       var delayMs = Math.max(0, Math.min(4000, Math.round(Number(delayInput.value)*1000)));
-      setTimeout(function(){
-        capturePhotoAndOCR(row.id);
-      }, delayMs);
-    }else{
-      // snapshot mode only logs when user presses Snapshot; here we just keep overlays
+      setTimeout(function(){ capturePhotoAndOCR(row.id); }, delayMs);
     }
   }
 
   function bumpRowCountByKey(key, count){
-    // find first row with matching key
     for(var i=0;i<state.rows.length;i++){
       var r = state.rows[i];
       var k = (r.value + '|' + (r.format||'') );
@@ -652,18 +610,15 @@
 
   // --------- Snapshot pipeline ---------
   btnSnapshot.addEventListener('click', function(){
-    if(state.autolog){ toast('Turn OFF Auto‑logging to use Snapshot.'); return; }
+    if(state.autolog){ toast('Turn OFF Auto-logging to use Snapshot.'); return; }
     var id = frameToImageData(1024);
     if(!id){ toast('No frame.'); return; }
-    // Try decode (cascade quickly)
     var didLog = false;
     var attemptJsQR = function(next){
       if(!window.jsQR) return next(null);
       try{
         var res = window.jsQR(id.data, id.width, id.height, { inversionAttempts:'dontInvert' });
-        if(res && res.data){
-          return next({ text: res.data, format:'QR_CODE' });
-        }
+        if(res && res.data){ return next({ text: res.data, format:'QR_CODE' }); }
       }catch(e){}
       next(null);
     };
@@ -680,12 +635,10 @@
       if(!window.BarcodeDetector) return next(null);
       try{
         var det = new window.BarcodeDetector();
-        // convert ImageData back to canvas for detect() (which needs ImageBitmap/ImageBitmapSource)
         var c = document.createElement('canvas'); c.width = id.width; c.height = id.height;
         c.getContext('2d').putImageData(id,0,0);
-        createImageBitmap(c).then(function(bmp){
-          return det.detect(bmp);
-        }).then(function(list){
+        createImageBitmap(c).then(function(bmp){ return det.detect(bmp); })
+        .then(function(list){
           if(list && list.length){ next({ text:list[0].rawValue, format:list[0].format||'unknown' }); } else next(null);
         })['catch'](function(){ next(null); });
       }catch(e){ next(null); }
@@ -697,7 +650,6 @@
         if(resZX){ logFromSnapshot(resZX); return; }
         attemptJsQR(function(resQR){
           if(resQR){ logFromSnapshot(resQR); return; }
-          // nothing decoded; still allow OCR + photo log? We'll log an empty value row only if OCR produces weight
           capturePhotoAndOCR(null, function(weight, photoData){
             if(weight!=null){
               var now = new Date();
@@ -751,7 +703,7 @@
     capturePhotoAndOCR(state.nextRowId - 1, function(){ toast('Snapshot logged.'); });
   }
 
-  // --------- Photo + OCR ---------
+  // --------- Photo + OCR OR scale weight ---------
   function capturePhotoAndOCR(rowId, cb){
     // photo
     var vw = video.videoWidth||1280, vh = video.videoHeight||720;
@@ -761,27 +713,29 @@
     var photoData = null;
     try{ photoData = c.toDataURL('image/jpeg', 0.85); }catch(e){}
 
-    // OCR if enabled
+    // If weight source is BT/HID, use latest reading (if any) and skip OCR
+    if(state.weightSource !== 'ocr'){
+      var gramsVal = (typeof state.lastWeightGrams === 'number') ? state.lastWeightGrams : null;
+      if(rowId){
+        setRowPhoto(rowId, photoData);
+        if(gramsVal!=null){ setRowWeight(rowId, gramsVal); toast('Captured weight from scale: '+ gramsVal.toFixed(2) +' g'); }
+      }
+      if(cb) cb(gramsVal, photoData);
+      return;
+    }
+
     if(!state.wantOcr){
       if(rowId){ setRowPhoto(rowId, photoData); }
       if(cb) cb(null, photoData);
       return;
     }
-    // crop ROI from c -> roiC
-    var rr = {
-      x: Math.round(state.roi.x * vw),
-      y: Math.round(state.roi.y * vh),
-      w: Math.round(state.roi.w * vw),
-      h: Math.round(state.roi.h * vh)
-    };
+    var rr = { x: Math.round(state.roi.x * vw), y: Math.round(state.roi.y * vh), w: Math.round(state.roi.w * vw), h: Math.round(state.roi.h * vh) };
     var roiC = document.createElement('canvas'); roiC.width = rr.w*2; roiC.height = rr.h*2;
     var rx = roiC.getContext('2d');
-    // upscale 2x and light threshold
     try{
       rx.imageSmoothingEnabled = false;
       rx.drawImage(c, rr.x, rr.y, rr.w, rr.h, 0, 0, roiC.width, roiC.height);
       var id = rx.getImageData(0,0,roiC.width, roiC.height);
-      // threshold
       for(var i=0;i<id.data.length;i+=4){
         var yv = (id.data[i]*0.299 + id.data[i+1]*0.587 + id.data[i+2]*0.114)|0;
         var v = yv > 150 ? 255 : 0;
@@ -792,7 +746,6 @@
 
     ensureOcrWorker(function(ok){
       if(!ok){
-        ocrPulse(false, null);
         if(rowId){ setRowPhoto(rowId, photoData); }
         if(cb) cb(null, photoData);
         return;
@@ -800,27 +753,18 @@
       recognizeCanvas(roiC, function(text, words){
         var grams = parseWeightToGrams(text);
         if(grams!=null){ toast('Captured weight: '+ grams.toFixed(2) +' g'); }
-        // map word boxes to overlay coords
         var ow = overlay.width, oh = overlay.height;
-        var vrw = video.videoWidth||ow, vrh = video.videoHeight||oh;
-        var roiPx = {
-          x: state.roi.x * ow,
-          y: state.roi.y * oh,
-          w: state.roi.w * ow,
-          h: state.roi.h * oh
-        };
+        var roiPx = { x: state.roi.x * ow, y: state.roi.y * oh, w: state.roi.w * ow, h: state.roi.h * oh };
         state.ocrWords = [];
         for(var i=0;i<(words||[]).length;i++){
-          var wbx = words[i];
-          if(wbx && wbx.bbox){
-            var bx = {
-              x: roiPx.x + (wbx.bbox.x/roiC.width)*roiPx.w,
-              y: roiPx.y + (wbx.bbox.y/roiC.height)*roiPx.h,
-              w: (wbx.bbox.w/roiC.width)*roiPx.w,
-              h: (wbx.bbox.h/roiC.height)*roiPx.h
-            };
-            state.ocrWords.push({ text: wbx.text, bbox: bx });
-          }
+          var wbx = words[i]; if(!wbx || !wbx.bbox) continue;
+          var bx = {
+            x: roiPx.x + (wbx.bbox.x/roiC.width)*roiPx.w,
+            y: roiPx.y + (wbx.bbox.y/roiC.height)*roiPx.h,
+            w: (wbx.bbox.w/roiC.width)*roiPx.w,
+            h: (wbx.bbox.h/roiC.height)*roiPx.h
+          };
+          state.ocrWords.push({ text: wbx.text, bbox: bx });
         }
         drawOverlayBoxes(null);
         if(rowId){
@@ -851,9 +795,7 @@
     var r = getRowById(id); if(!r) return;
     r.weight_g = grams;
     var tr = document.getElementById('row-'+id);
-    if(tr){
-      tr.querySelector('[data-col="weight_g"]').textContent = String(grams.toFixed(2));
-    }
+    if(tr){ tr.querySelector('[data-col="weight_g"]').textContent = String(grams.toFixed(2)); }
     saveData();
   }
   function getRowById(id){
@@ -863,12 +805,12 @@
 
   // OCR helpers
   function ensureOcrWorker(cb){
-    if(state.ocrReady){ setPill(pillOCR, 'OCR: Ready', 'ok'); return cb(true); }
+    if(state.weightSource!=='ocr'){ updateWeightPill(); return cb(false); }
+    if(state.ocrReady){ setPill(pillOCR, 'Weight: OCR Ready', 'ok'); return cb(true); }
     if(typeof window.Tesseract === 'undefined'){
-      setPill(pillOCR, 'OCR: Unavailable', 'warn'); return cb(false);
+      setPill(pillOCR, 'Weight: OCR Unavailable', 'warn'); return cb(false);
     }
-    setPill(pillOCR, 'OCR: Loading…', 'warn');
-    // Try modern worker
+    setPill(pillOCR, 'Weight: OCR Loading…', 'warn');
     if(window.Tesseract.createWorker){
       var worker = window.Tesseract.createWorker({
         workerPath: 'vendor/worker.min.js',
@@ -876,29 +818,26 @@
         langPath: 'vendor/lang-data',
         gzip: true
       });
-      worker.load().then(function(){
-        return worker.loadLanguage('eng');
-      }).then(function(){ return worker.initialize('eng'); }).then(function(){
+      worker.load().then(function(){ return worker.loadLanguage('eng'); })
+      .then(function(){ return worker.initialize('eng'); })
+      .then(function(){
         state.ocrWorker = worker; state.ocrReady = true;
-        setPill(pillOCR, 'OCR: Ready', 'ok');
+        setPill(pillOCR, 'Weight: OCR Ready', 'ok');
         cb(true);
       })['catch'](function(e){
         console.warn('OCR worker load', e);
-        // fallback: legacy Tesseract.recognize signatures
         state.ocrWorker = null; state.ocrReady = true;
-        setPill(pillOCR, 'OCR: Legacy', 'warn');
+        setPill(pillOCR, 'Weight: OCR Legacy', 'warn');
         cb(true);
       });
       return;
     }
-    // No worker API; assume legacy recognize available
     state.ocrWorker = null; state.ocrReady = true;
-    setPill(pillOCR, 'OCR: Legacy', 'warn');
+    setPill(pillOCR, 'Weight: OCR Legacy', 'warn');
     cb(true);
   }
 
   function recognizeCanvas(canvas, cb){
-    // Prefer worker
     if(state.ocrWorker && state.ocrWorker.recognize){
       state.ocrWorker.recognize(canvas).then(function(res){
         var text = (res && res.data && res.data.text) ? res.data.text : '';
@@ -913,7 +852,6 @@
       })['catch'](function(e){ console.warn('ocr recognize', e); cb('', []); });
       return;
     }
-    // Legacy recognize signatures
     if(window.Tesseract && window.Tesseract.recognize){
       try{
         window.Tesseract.recognize(canvas, 'eng').then(function(res){
@@ -952,9 +890,138 @@
     return Math.round(g*100)/100;
   }
 
-  function ocrPulse(hasText, words){
-    // lightweight feedback to keep ROI pulsing; currently handled by drawOverlayBoxes using state.ocrWords
-    // we could add subtle animation if desired.
+  // --------- Weight via Bluetooth (BLE Weight Scale Service) ---------
+  function connectBluetoothScale(){
+    if(!navigator.bluetooth){ toast('Web Bluetooth not supported.'); return; }
+    navigator.bluetooth.requestDevice({ filters: [{ services: [0x181D] }], optionalServices: [0x181D] })
+    .then(function(device){
+      state.bt.device = device;
+      return device.gatt.connect();
+    }).then(function(server){
+      state.bt.server = server;
+      return server.getPrimaryService(0x181D);
+    }).then(function(service){
+      return service.getCharacteristic(0x2A9D);
+    }).then(function(char){
+      state.bt.char = char;
+      updateWeightPill();
+      char.startNotifications().then(function(){
+        char.addEventListener('characteristicvaluechanged', function(ev){
+          try{
+            var dv = ev.target.value;
+            var grams = parseBLEWeightToGrams(dv);
+            if(grams!=null){ state.lastWeightGrams = grams; }
+          }catch(e){}
+        });
+        toast('Bluetooth scale connected.');
+      });
+    })['catch'](function(err){
+      console.warn('BT scale', err);
+      toast('Bluetooth connect failed.');
+    });
+  }
+
+  function parseBLEWeightToGrams(dv){
+    if(!dv || dv.byteLength<3) return null;
+    var flags = dv.getUint8(0);
+    var unitKg = ((flags & 0x01)===0);
+    var raw = dv.getUint16(1, true);
+    var val = sfloatToNumber(raw);
+    if(val==null) return null;
+    var kg = unitKg ? val : (val * 0.45359237);
+    return Math.round(kg * 1000 * 100)/100;
+  }
+  function sfloatToNumber(u16){
+    var mant = u16 & 0x0FFF;
+    var exp = (u16 & 0xF000) >> 12;
+    if(mant & 0x0800){ mant = -((~mant & 0x0FFF) + 1); }
+    if(exp & 0x8){ exp = -((~exp & 0x0F) + 1); }
+    var val = mant * Math.pow(10, exp);
+    if(!isFinite(val)) return null;
+    return val;
+  }
+
+  // --------- Weight via USB HID Scale ---------
+  function connectHIDScale(){
+    if(!navigator.hid){ toast('WebHID not supported.'); return; }
+    navigator.hid.requestDevice({ filters: [{ usagePage: 0x8D }] })
+    .then(function(devices){
+      if(!devices || !devices.length){ throw new Error('No HID scale selected'); }
+      var device = devices[0];
+      state.hid.device = device;
+      return device.open().then(function(){ return device; });
+    }).then(function(device){
+      device.addEventListener('inputreport', function(e){
+        try{
+          var dv = new DataView(e.data.buffer);
+          var grams = heuristicParseHIDReportToGrams(dv);
+          if(grams!=null){ state.lastWeightGrams = grams; }
+        }catch(err){};
+      });
+      updateWeightPill();
+      toast('USB HID scale connected.');
+    })['catch'](function(err){
+      console.warn('HID scale', err);
+      toast('USB HID connect failed.');
+    });
+  }
+
+  function heuristicParseHIDReportToGrams(dv){
+    if(!dv || dv.byteLength<2) return null;
+    function clamp(v){ return (v>0 && v<500000) ? v : null; }
+    var candidates = [];
+    for(var i=0;i<=dv.byteLength-2;i+=2){
+      var v16 = dv.getInt16(i, true);
+      if(v16>0){ candidates.push(v16); }
+      var u16 = dv.getUint16(i, true);
+      if(u16>0){ candidates.push(u16); }
+    }
+    var best = null;
+    for(var j=0;j<candidates.length;j++){
+      var c = candidates[j];
+      if(c>0 && c<20000){ best = c; }
+      else if(c>0 && c<2000){ best = Math.round(c*10); }
+      if(best!=null) break;
+    }
+    if(best==null && dv.byteLength>=4){
+      var u32 = dv.getUint32(0, true);
+      if(u32>0 && u32<500000) best = u32;
+    }
+    return clamp(best);
+  }
+
+  // --------- Diagnostics ---------
+  function runEngineDiagnostics(){
+    var lines = [];
+    lines.push('=== Scan Engines ===');
+    lines.push('BarcodeDetector: ' + (('BarcodeDetector' in window) ? 'present' : 'missing'));
+    if('BarcodeDetector' in window && window.BarcodeDetector.getSupportedFormats){
+      try{
+        window.BarcodeDetector.getSupportedFormats().then(function(f){ console.log('BD formats:', f); });
+        lines.push('BD.getSupportedFormats(): OK (see console)');
+      }catch(e){ lines.push('BD.getSupportedFormats(): error'); }
+    }
+    lines.push('ZXing present: ' + ((window.ZXingBrowser||window.ZXing)?'yes':'no'));
+    lines.push('jsQR present: ' + (window.jsQR?'yes':'no'));
+    lines.push('Camera running: ' + (state.scanning?'yes':'no'));
+    lines.push('Video dims: ' + (video.videoWidth||0) + 'x' + (video.videoHeight||0));
+    alert(lines.join('\n'));
+  }
+
+  function runOCRDiagnostics(){
+    state.weightSource = 'ocr'; // force OCR context for the test
+    ensureOcrWorker(function(ok){
+      if(!ok){ alert('OCR not available.'); return; }
+      var c = document.createElement('canvas'); c.width = 320; c.height = 120;
+      var cx = c.getContext('2d');
+      cx.fillStyle = '#fff'; cx.fillRect(0,0,c.width,c.height);
+      cx.fillStyle = '#000'; cx.font = '48px Arial';
+      cx.fillText('123 g', 40, 70);
+      recognizeCanvas(c, function(text, words){
+        var grams = parseWeightToGrams(text);
+        alert('OCR sample text: ' + JSON.stringify(text) + '\nParsed grams: ' + grams);
+      });
+    });
   }
 
   // --------- Import / Export ---------
@@ -968,7 +1035,6 @@
         var v = r[cols[c]];
         if(v==null) v='';
         v = String(v);
-        // Excel cell limit for CSV is lenient but we keep parity with XLSX truncation
         if(v.length>32760) v = v.slice(0,32760);
         if(v.indexOf('"')!==-1 || v.indexOf(',')!==-1 || v.indexOf('\n')!==-1){
           v = '"' + v.replace(/"/g,'""') + '"';
@@ -1002,10 +1068,7 @@
       var r = state.rows[i];
       var row = [];
       for(var c=0;c<cols.length;c++){
-        var v = r[cols[c]];
-        if(v==null) v='';
-        v = String(v);
-        if(v.length>32760) v = v.slice(0,32760);
+        var v = r[cols[c]]; if(v==null) v=''; v = String(v); if(v.length>32760) v = v.slice(0,32760);
         row.push(v);
       }
       data.push(row);
@@ -1043,10 +1106,7 @@
         var text = String(reader.result);
         var lines = text.split(/\r?\n/);
         var header = lines.shift();
-        var cols = header.split(',');
-        // basic CSV (quoted fields allowed)
         var hdr = ['id','value','format','engine','source','date','time','weight_g','photo','count','notes'];
-        var rows = [];
         function parseLine(line){
           var out = []; var cur = ''; var inq=false;
           for(var i=0;i<line.length;i++){
@@ -1065,15 +1125,11 @@
         }
         state.rows = []; state.seen = {}; state.nextRowId = 1;
         for(var li=0; li<lines.length; li++){
-          var line = lines[li];
-          if(!line) continue;
+          var line = lines[li]; if(!line) continue;
           var cells = parseLine(line);
           var obj = {};
-          for(var c=0;c<Math.min(cells.length, hdr.length); c++){
-            obj[hdr[c]] = cells[c];
-          }
-          if(obj.id){ obj.id = Number(obj.id)||state.nextRowId++; }
-          else obj.id = state.nextRowId++;
+          for(var c=0;c<Math.min(cells.length, hdr.length); c++){ obj[hdr[c]] = cells[c]; }
+          if(obj.id){ obj.id = Number(obj.id)||state.nextRowId++; } else obj.id = state.nextRowId++;
           obj.count = Number(obj.count)||1;
           if(obj.weight_g!=null && obj.weight_g!=='') obj.weight_g = Number(obj.weight_g);
           state.rows.push(obj);
@@ -1144,9 +1200,7 @@
     state.cooldownMs = Math.round(v*1000);
     savePrefs();
   });
-  delayInput.addEventListener('change', function(){
-    savePrefs();
-  });
+  delayInput.addEventListener('change', function(){ savePrefs(); });
   scaleMode.addEventListener('change', function(){ savePrefs(); });
 
   autoLog.addEventListener('change', function(){
@@ -1158,16 +1212,28 @@
     state.wantOcr = !!toggleOCR.checked;
     savePrefs();
   });
+  weightSource.addEventListener('change', function(){
+    state.weightSource = weightSource.value || 'ocr';
+    updateWeightPill();
+    savePrefs();
+  });
+  showROI.addEventListener('change', function(){ state.showROI = !!showROI.checked; savePrefs(); drawOverlayBoxes(null); });
+  btnConnectScale.addEventListener('click', function(){
+    if(state.weightSource==='bluetooth') connectBluetoothScale();
+    else if(state.weightSource==='hid') connectHIDScale();
+    else toast('Select Bluetooth or USB HID to connect');
+  });
+  btnTestEng.addEventListener('click', runEngineDiagnostics);
+  btnTestOCR.addEventListener('click', runOCRDiagnostics);
 
   // --------- Init ---------
   function init(){
     checkPermission();
     enumerateCams();
     loadPrefs();
-    // initial overlay
+    if(weightSource){ weightSource.value = state.weightSource || 'ocr'; }
+    if(showROI){ showROI.checked = !!state.showROI; }
     drawOverlayBoxes(null);
-    // Warm manifest/service worker registration done in sw-reg.js
   }
-
   document.addEventListener('DOMContentLoaded', init);
 })();
