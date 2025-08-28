@@ -49,6 +49,12 @@
   var logTable = document.getElementById('logTable').querySelector('tbody');
   var toastEl = document.getElementById('toast');
 
+  // Reusable canvases for capture and OCR ROI
+  var captureCanvas = document.createElement('canvas');
+  var captureCtx = captureCanvas.getContext('2d');
+  var roiCanvas = document.createElement('canvas');
+  var roiCtx = roiCanvas.getContext('2d');
+
   // --------- State ---------
   var state = {
     stream: null,
@@ -707,11 +713,12 @@
   function capturePhotoAndOCR(rowId, cb){
     // photo
     var vw = video.videoWidth||1280, vh = video.videoHeight||720;
-    var c = document.createElement('canvas'); c.width = vw; c.height = vh;
-    var cx = c.getContext('2d');
+    captureCanvas.width = vw; captureCanvas.height = vh;
+    var cx = captureCtx;
+    cx.clearRect(0, 0, vw, vh);
     try{ cx.drawImage(video, 0, 0, vw, vh); }catch(e){}
     var photoData = null;
-    try{ photoData = c.toDataURL('image/jpeg', 0.85); }catch(e){}
+    try{ photoData = captureCanvas.toDataURL('image/jpeg', 0.85); }catch(e){}
 
     // If weight source is BT/HID, use latest reading (if any) and skip OCR
     if(state.weightSource !== 'ocr'){
@@ -730,12 +737,13 @@
       return;
     }
     var rr = { x: Math.round(state.roi.x * vw), y: Math.round(state.roi.y * vh), w: Math.round(state.roi.w * vw), h: Math.round(state.roi.h * vh) };
-    var roiC = document.createElement('canvas'); roiC.width = rr.w*2; roiC.height = rr.h*2;
-    var rx = roiC.getContext('2d');
+    roiCanvas.width = rr.w*2; roiCanvas.height = rr.h*2;
+    var rx = roiCtx;
+    rx.clearRect(0, 0, roiCanvas.width, roiCanvas.height);
     try{
       rx.imageSmoothingEnabled = false;
-      rx.drawImage(c, rr.x, rr.y, rr.w, rr.h, 0, 0, roiC.width, roiC.height);
-      var id = rx.getImageData(0,0,roiC.width, roiC.height);
+      rx.drawImage(captureCanvas, rr.x, rr.y, rr.w, rr.h, 0, 0, roiCanvas.width, roiCanvas.height);
+      var id = rx.getImageData(0,0,roiCanvas.width, roiCanvas.height);
       for(var i=0;i<id.data.length;i+=4){
         var yv = (id.data[i]*0.299 + id.data[i+1]*0.587 + id.data[i+2]*0.114)|0;
         var v = yv > 150 ? 255 : 0;
@@ -750,7 +758,7 @@
         if(cb) cb(null, photoData);
         return;
       }
-      recognizeCanvas(roiC, function(text, words){
+      recognizeCanvas(roiCanvas, function(text, words){
         var grams = parseWeightToGrams(text);
         if(grams!=null){ toast('Captured weight: '+ grams.toFixed(2) +' g'); }
         var ow = overlay.width, oh = overlay.height;
@@ -759,10 +767,10 @@
         for(var i=0;i<(words||[]).length;i++){
           var wbx = words[i]; if(!wbx || !wbx.bbox) continue;
           var bx = {
-            x: roiPx.x + (wbx.bbox.x/roiC.width)*roiPx.w,
-            y: roiPx.y + (wbx.bbox.y/roiC.height)*roiPx.h,
-            w: (wbx.bbox.w/roiC.width)*roiPx.w,
-            h: (wbx.bbox.h/roiC.height)*roiPx.h
+            x: roiPx.x + (wbx.bbox.x/roiCanvas.width)*roiPx.w,
+            y: roiPx.y + (wbx.bbox.y/roiCanvas.height)*roiPx.h,
+            w: (wbx.bbox.w/roiCanvas.width)*roiPx.w,
+            h: (wbx.bbox.h/roiCanvas.height)*roiPx.h
           };
           state.ocrWords.push({ text: wbx.text, bbox: bx });
         }
