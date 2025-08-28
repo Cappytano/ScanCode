@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ScanCode</title>
+  <meta name="theme-color" content="#111114">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preload" href="styles.css" as="style">
+  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="Fast, reliable barcode + OCR web scanner for Windows 11.">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">🧪 ScanCode</div>
+  <div class="pills">
+    <span id="pill-engine" class="pill" title="Active decode engine">Engine: —</span>
+    <span id="pill-perm" class="pill" title="Camera permission">Perm: —</span>
+    <span id="pill-ocr" class="pill" title="OCR status">OCR: —</span>
+    <span id="pill-autolog" class="pill" title="Auto logging mode">Auto‑log: On</span>
+  </div>
+</header>
+
+<main>
+  <section class="controls">
+    <div class="grid">
+      <label>
+        <span>Camera</span>
+        <select id="cameraSelect" title="Choose video input"></select>
+      </label>
+      <label>
+        <span>Facing</span>
+        <select id="facingSelect" title="Preferred facing">
+          <option value="">Auto</option>
+          <option value="environment">Environment</option>
+          <option value="user">User</option>
+        </select>
+      </label>
+      <label>
+        <span>Cooldown (s)</span>
+        <input id="cooldown" type="number" min="0" max="20" step="1" value="5" title="Cooldown after a successful scan">
+      </label>
+      <label>
+        <span>Weight Delay (s)</span>
+        <input id="delay" type="number" min="0" max="4" step="0.5" value="1.5" title="Delay before snapshot/OCR after scan">
+      </label>
+      <label>
+        <span>Scale Mode</span>
+        <select id="scaleMode" title="Processing resolution">
+          <option value="auto">Auto</option>
+          <option value="1080">≤1080w</option>
+          <option value="1024">≤1024w</option>
+          <option value="720">≤720w</option>
+          <option value="640">≤640w</option>
+        </select>
+      </label>
+      <label id="focusWrap" class="focus-wrap hidden">
+        <span>Focus</span>
+        <input id="focusSlider" type="range" min="0" max="1000" step="1" value="500" title="Manual focus">
+      </label>
+      <div class="btns">
+        <button id="btnPerm" type="button" title="Request camera permission">Request Permission</button>
+        <button id="btnRefresh" type="button" title="Refresh camera list">Refresh Cameras</button>
+        <button id="btnStart" type="button" class="primary" title="Start camera">Start</button>
+        <button id="btnStop" type="button" title="Stop camera">Stop</button>
+      </div>
+      <div class="btns">
+        <label class="switch">
+          <input id="autoLog" type="checkbox" checked>
+          <span>Auto‑logging</span>
+        </label>
+        <button id="btnSnapshot" type="button" title="Capture single frame and log (when Auto‑log is OFF)">Snapshot</button>
+        <label class="switch">
+          <input id="toggleOCR" type="checkbox" checked>
+          <span>OCR Weight</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section class="preview">
+    <div class="video-wrap">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay" class="overlay"></canvas>
+      <canvas id="work" class="hidden"></canvas>
+    </div>
+    <div class="overlay-controls">
+      <span>Weight ROI</span>
+      <button id="btnRoiReset" type="button">Reset ROI</button>
+    </div>
+  </section>
+
+  <section class="data">
+    <div class="import-export">
+      <div class="btns">
+        <label class="filelabel" title="Import CSV">
+          <input id="importCSV" type="file" accept=".csv">
+          Import CSV
+        </label>
+        <label class="filelabel" title="Import XLSX (if SheetJS loaded)">
+          <input id="importXLSX" type="file" accept=".xlsx,.xlsb,.xlsm,.xls">
+          Import XLSX
+        </label>
+        <button id="exportCSV" type="button">Export CSV</button>
+        <button id="exportXLSX" type="button">Export XLSX</button>
+        <button id="exportZIP" type="button" title="CSV + Photos (if JSZip loaded)">Export ZIP</button>
+        <button id="btnClear" type="button" title="Clear rows">Clear Rows</button>
+      </div>
+      <div class="notes">
+        <label>
+          <span>Notes (applies to next log only)</span>
+          <input id="noteInput" type="text" placeholder="Optional note for the next entry">
+        </label>
+      </div>
+    </div>
+
+    <div class="table-wrap" role="region" aria-label="Scan log">
+      <table id="logTable">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Value</th>
+            <th>Format</th>
+            <th>Engine</th>
+            <th>Source</th>
+            <th>Date</th>
+            <th>Time</th>
+            <th>Weight (g)</th>
+            <th>Photo</th>
+            <th>Count</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
+
+<script defer src="app.js"></script>
+<script defer src="sw-reg.js"></script>
+</body>
+</html>
