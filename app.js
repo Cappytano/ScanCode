@@ -73,8 +73,8 @@
     showROI: true,
     weightSource: 'ocr',
     lastWeightGrams: null,
-    bt: { device:null, server:null, char:null },
-    hid: { device:null },
+    bt: { device:null, server:null, char:null, valListener:null, disconnectListener:null },
+    hid: { device:null, reportListener:null, disconnectListener:null },
     focusSupported: false,
     focusMin: 0, focusMax: 1000, focusStep: 1
   };
@@ -893,9 +893,13 @@
   // --------- Weight via Bluetooth (BLE Weight Scale Service) ---------
   function connectBluetoothScale(){
     if(!navigator.bluetooth){ toast('Web Bluetooth not supported.'); return; }
+    if(state.bt.device){ cleanupBluetoothScale(); }
     navigator.bluetooth.requestDevice({ filters: [{ services: [0x181D] }], optionalServices: [0x181D] })
     .then(function(device){
       state.bt.device = device;
+      var onDisconnect = function(){ cleanupBluetoothScale(); };
+      state.bt.disconnectListener = onDisconnect;
+      device.addEventListener('gattserverdisconnected', onDisconnect);
       return device.gatt.connect();
     }).then(function(server){
       state.bt.server = server;
@@ -905,20 +909,45 @@
     }).then(function(char){
       state.bt.char = char;
       updateWeightPill();
+      var onValue = function(ev){
+        try{
+          var dv = ev.target.value;
+          var grams = parseBLEWeightToGrams(dv);
+          if(grams!=null){ state.lastWeightGrams = grams; }
+        }catch(e){}
+      };
+      state.bt.valListener = onValue;
       char.startNotifications().then(function(){
-        char.addEventListener('characteristicvaluechanged', function(ev){
-          try{
-            var dv = ev.target.value;
-            var grams = parseBLEWeightToGrams(dv);
-            if(grams!=null){ state.lastWeightGrams = grams; }
-          }catch(e){}
-        });
+        char.addEventListener('characteristicvaluechanged', onValue);
         toast('Bluetooth scale connected.');
       });
     })['catch'](function(err){
       console.warn('BT scale', err);
       toast('Bluetooth connect failed.');
     });
+  }
+
+  function cleanupBluetoothScale(){
+    try{
+      if(state.bt.char && state.bt.valListener){
+        state.bt.char.removeEventListener('characteristicvaluechanged', state.bt.valListener);
+      }
+      if(state.bt.char && state.bt.char.stopNotifications){
+        state.bt.char.stopNotifications()['catch'](function(){});
+      }
+    }catch(e){}
+    try{
+      if(state.bt.device && state.bt.disconnectListener){
+        state.bt.device.removeEventListener('gattserverdisconnected', state.bt.disconnectListener);
+      }
+    }catch(e){}
+    try{
+      if(state.bt.server && state.bt.server.disconnect){
+        state.bt.server.disconnect();
+      }
+    }catch(e){}
+    state.bt = { device:null, server:null, char:null, valListener:null, disconnectListener:null };
+    updateWeightPill();
   }
 
   function parseBLEWeightToGrams(dv){
@@ -944,26 +973,48 @@
   // --------- Weight via USB HID Scale ---------
   function connectHIDScale(){
     if(!navigator.hid){ toast('WebHID not supported.'); return; }
+    if(state.hid.device){ cleanupHIDScale(); }
     navigator.hid.requestDevice({ filters: [{ usagePage: 0x8D }] })
     .then(function(devices){
       if(!devices || !devices.length){ throw new Error('No HID scale selected'); }
       var device = devices[0];
       state.hid.device = device;
+      var onDisconnect = function(){ cleanupHIDScale(); };
+      state.hid.disconnectListener = onDisconnect;
+      device.addEventListener('disconnect', onDisconnect);
       return device.open().then(function(){ return device; });
     }).then(function(device){
-      device.addEventListener('inputreport', function(e){
+      var reportListener = function(e){
         try{
           var dv = new DataView(e.data.buffer);
           var grams = heuristicParseHIDReportToGrams(dv);
           if(grams!=null){ state.lastWeightGrams = grams; }
         }catch(err){};
-      });
+      };
+      state.hid.reportListener = reportListener;
+      device.addEventListener('inputreport', reportListener);
       updateWeightPill();
       toast('USB HID scale connected.');
     })['catch'](function(err){
       console.warn('HID scale', err);
       toast('USB HID connect failed.');
     });
+  }
+
+  function cleanupHIDScale(){
+    try{
+      if(state.hid.device && state.hid.reportListener){
+        state.hid.device.removeEventListener('inputreport', state.hid.reportListener);
+      }
+      if(state.hid.device && state.hid.disconnectListener){
+        state.hid.device.removeEventListener('disconnect', state.hid.disconnectListener);
+      }
+      if(state.hid.device && state.hid.device.opened){
+        state.hid.device.close()['catch'](function(){});
+      }
+    }catch(e){}
+    state.hid = { device:null, reportListener:null, disconnectListener:null };
+    updateWeightPill();
   }
 
   function heuristicParseHIDReportToGrams(dv){
