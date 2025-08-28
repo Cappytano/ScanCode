@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ScanCode (ZXing-only)</title>
+  <title>ScanCode (ZXing WASM only)</title>
   <meta name="theme-color" content="#111114">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
@@ -14,7 +14,7 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">📦 ScanCode (ZXing-only)</div>
+  <div class="brand">📦 ScanCode (ZXing WASM only)</div>
   <div class="pills">
     <span id="pill-engine" class="pill" title="Active decode engine">Engine: —</span>
     <span id="pill-perm" class="pill" title="Camera permission">Perm: —</span>
@@ -165,14 +165,23 @@
 
 <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
 
-<!-- Vendors -->
+<!-- Vendors (NOT included in this ZIP) -->
 <script defer src="vendor/zxing-wasm-reader.iife.js"></script>
 <script defer>
-window.addEventListener('DOMContentLoaded', function(){
-  if(window.ZXingBrowser && ZXingBrowser.setZXingModuleOverrides){
-    ZXingBrowser.setZXingModuleOverrides({
-      locateFile: function(path, prefix){ return 'vendor/zxing_reader.wasm'; }
-    });
+window.addEventListener('DOMContentLoaded', function () {
+  if (window.ZXingWASM && ZXingWASM.prepareZXingModule) {
+    try {
+      const p = ZXingWASM.prepareZXingModule({
+        overrides: {
+          locateFile: function (path, prefix) {
+            if (/\.wasm$/i.test(path)) return 'vendor/zxing_reader.wasm';
+            return prefix + path;
+          }
+        },
+        fireImmediately: true
+      });
+      if (p && typeof p.then === 'function') { p.catch(function(){}); }
+    } catch (e) { /* ignore */ }
   }
 });
 </script>
