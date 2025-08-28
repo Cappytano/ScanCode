@@ -1104,29 +1104,13 @@
     reader.onload = function(){
       try{
         var text = String(reader.result);
-        var lines = text.split(/\r?\n/);
+        var lines = parseCSV(text);
         var header = lines.shift();
         var hdr = ['id','value','format','engine','source','date','time','weight_g','photo','count','notes'];
-        function parseLine(line){
-          var out = []; var cur = ''; var inq=false;
-          for(var i=0;i<line.length;i++){
-            var ch = line[i];
-            if(ch === '"' ){
-              if(inq && line[i+1]==='"'){ cur+='"'; i++; }
-              else inq = !inq;
-            }else if(ch === ',' && !inq){
-              out.push(cur); cur='';
-            }else{
-              cur+=ch;
-            }
-          }
-          out.push(cur);
-          return out;
-        }
         state.rows = []; state.seen = {}; state.nextRowId = 1;
         for(var li=0; li<lines.length; li++){
-          var line = lines[li]; if(!line) continue;
-          var cells = parseLine(line);
+          var cells = lines[li];
+          if(!cells.length || cells.every(function(x){return x==='';})) continue;
           var obj = {};
           for(var c=0;c<Math.min(cells.length, hdr.length); c++){ obj[hdr[c]] = cells[c]; }
           if(obj.id){ obj.id = Number(obj.id)||state.nextRowId++; } else obj.id = state.nextRowId++;
