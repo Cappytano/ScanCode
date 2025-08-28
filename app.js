@@ -65,6 +65,7 @@
     cooldownMs: 5000,
     scanTimer: null,
     scanning: false,
+    sizeOverlayHandler: null,
     lastScanAt: 0,
     rows: [],
     seen: {}, // key -> count
@@ -215,7 +216,10 @@
       state.scanning = true;
       sizeOverlay();
       video.addEventListener('loadedmetadata', sizeOverlayOnce, { once: true });
-      video.addEventListener('playing', sizeOverlay);
+      if(!state.sizeOverlayHandler){
+        state.sizeOverlayHandler = sizeOverlay;
+        video.addEventListener('playing', state.sizeOverlayHandler);
+      }
       setupFocusUI();
       scanLoopSchedule(100);
     })['catch'](function(err){
@@ -227,6 +231,10 @@
 
   function stopStream(){
     if(state.scanTimer){ clearTimeout(state.scanTimer); state.scanTimer = null; }
+    if(state.sizeOverlayHandler){
+      video.removeEventListener('playing', sizeOverlay);
+      state.sizeOverlayHandler = null;
+    }
     if(state.stream){ state.stream.getTracks().forEach(function(t){ t.stop(); }); }
     state.stream = null; state.track = null; state.scanning = false;
   }
