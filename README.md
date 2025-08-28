@@ -10,3 +10,13 @@ Fast, reliable barcode + OCR scanner for Windows 11 (Chrome/Edge/Firefox) with r
 - **Show OCR Box** toggle: hide/show the adjustable ROI overlay.
 
 See `README.md` from the previous build for full specs.
+
+
+## Vendor bundle
+This package includes vendor files placed in `/vendor` and pre-wired in `index.html`:
+- ZXing WASM IIFE + `zxing_reader.wasm`
+- jsQR
+- Tesseract + worker + core wasm loader + `eng.traineddata.gz`
+- SheetJS (XLSX) and JSZip
+
+> If ZXing still fails to find the wasm, verify that `vendor/zxing_reader.wasm` is accessible over HTTPS and not blocked by CSP.

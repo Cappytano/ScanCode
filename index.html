@@ -165,6 +165,24 @@
 
 <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
 
+
+  <!-- Vendor libraries (deferred, ordered) -->
+  <script defer src="vendor/zxing-wasm-reader.iife.js"></script>
+  <script defer>
+  // Ensure ZXing WASM is loaded from the vendor path
+  window.addEventListener('DOMContentLoaded', function(){
+    if(window.ZXingBrowser && ZXingBrowser.setZXingModuleOverrides){
+      ZXingBrowser.setZXingModuleOverrides({
+        locateFile: function(path, prefix){ return 'vendor/zxing_reader.wasm'; }
+      });
+    }
+  });
+  </script>
+  <script defer src="vendor/jsQR.js"></script>
+  <script defer src="vendor/tesseract.min.js"></script>
+  <script defer src="vendor/xlsx.full.min.js"></script>
+  <script defer src="vendor/jszip.min.js"></script>
+
 <script defer src="app.js"></script>
 <script defer src="sw-reg.js"></script>
 </body>

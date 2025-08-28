@@ -1,6 +1,15 @@
 /* very small passthrough service worker */
 const CACHE = 'scancode-v2';
 const CORE = [
+  './vendor/zxing-wasm-reader.iife.js',
+  './vendor/zxing_reader.wasm',
+  './vendor/jsQR.js',
+  './vendor/tesseract.min.js',
+  './vendor/tesseract-core/tesseract-core.wasm.js',
+  './vendor/tesseract-core/tesseract-core.wasm',
+  './vendor/lang-data/eng.traineddata.gz',
+  './vendor/xlsx.full.min.js',
+  './vendor/jszip.min.js',
   './',
   './index.html',
   './styles.css',
