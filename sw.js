@@ -1,4 +1,4 @@
-const CACHE='scancode-zxing-only-v1';
+const CACHE='scancode-zxing-only-v2';
 const CORE=['./','./index.html','./styles.css','./app.js','./sw-reg.js','./manifest.webmanifest',
 './icons/icon-192.png','./icons/icon-512.png','./icons/favicon-32.png','./icons/favicon-16.png',
 './vendor/zxing-wasm-reader.iife.js','./vendor/zxing_reader.wasm','./vendor/tesseract.min.js',
