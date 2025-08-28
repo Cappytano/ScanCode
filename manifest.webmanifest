@@ -1,5 +1,5 @@
 {
-  "name": "ScanCode",
+  "name": "ScanCode (ZXing-only)",
   "short_name": "ScanCode",
   "start_url": "./",
   "display": "standalone",

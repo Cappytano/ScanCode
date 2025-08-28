@@ -1,22 +1,12 @@
-# ScanCode
+# ScanCode (ZXing-only)
 
-Fast, reliable barcode + OCR scanner for Windows 11 (Chrome/Edge/Firefox) with robust fallbacks, real-time overlays, logging, and import/export.
+This build removes Browser BarcodeDetector and jsQR; it uses **ZXing WASM only** for all decoding.
 
-## New (requested) features
-- **Weight Source dropdown**: choose **OCR**, **Bluetooth (BLE Weight Scale Service)**, or **USB HID scale**.
-- **Connect Scale** button to pair/connect depending on source.
-- **Test Engines** button: checks BarcodeDetector / ZXing / jsQR availability and camera readiness.
-- **Test OCR** button: loads OCR engine and verifies with a synthetic sample, reporting parse status.
-- **Show OCR Box** toggle: hide/show the adjustable ROI overlay.
+### Included features
+- ZXing WASM engine (IIFE) with path override for `zxing_reader.wasm`.
+- OCR weight from ROI via Tesseract (with worker and `eng.traineddata.gz`).
+- Weight sources: OCR, Bluetooth (BLE Weight Scale Service 0x181D), USB (WebHID). 
+- Snapshot vs Auto-log, ROI overlay with drag/resize and word boxes, manual focus slider, import/export CSV+XLSX, optional ZIP with photos.
+- PWA (manifest + service worker + icons).
 
-See `README.md` from the previous build for full specs.
-
-
-## Vendor bundle
-This package includes vendor files placed in `/vendor` and pre-wired in `index.html`:
-- ZXing WASM IIFE + `zxing_reader.wasm`
-- jsQR
-- Tesseract + worker + core wasm loader + `eng.traineddata.gz`
-- SheetJS (XLSX) and JSZip
-
-> If ZXing still fails to find the wasm, verify that `vendor/zxing_reader.wasm` is accessible over HTTPS and not blocked by CSP.
+> Serve over HTTPS (or localhost) for camera, BLE, and HID.

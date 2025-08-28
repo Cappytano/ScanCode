@@ -3,19 +3,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ScanCode</title>
+  <title>ScanCode (ZXing-only)</title>
   <meta name="theme-color" content="#111114">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <link rel="preload" href="styles.css" as="style">
   <link rel="stylesheet" href="styles.css">
-  <meta name="description" content="Fast, reliable barcode + OCR web scanner with scale integration (BLE/USB HID).">
+  <meta name="description" content="Barcode + OCR web scanner using ZXing WASM only, with BLE/USB HID scale integration.">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">🧪 ScanCode</div>
+  <div class="brand">📦 ScanCode (ZXing-only)</div>
   <div class="pills">
     <span id="pill-engine" class="pill" title="Active decode engine">Engine: —</span>
     <span id="pill-perm" class="pill" title="Camera permission">Perm: —</span>
@@ -79,7 +78,7 @@
         </label>
       </div>
 
-      <!-- Run tests -->
+      <!-- Core controls -->
       <div class="btns">
         <button id="btnPerm" type="button" title="Request camera permission">Request Permission</button>
         <button id="btnRefresh" type="button" title="Refresh camera list">Refresh Cameras</button>
@@ -97,8 +96,9 @@
           <span>OCR Weight</span>
         </label>
       </div>
+      <!-- Diagnostics -->
       <div class="btns">
-        <button id="btnTestEng" type="button" title="Run scanning engine diagnostics">Test Engines</button>
+        <button id="btnTestEng" type="button" title="Run scanning engine diagnostics">Test Engine</button>
         <button id="btnTestOCR" type="button" title="Run OCR diagnostics">Test OCR</button>
       </div>
     </div>
@@ -165,25 +165,21 @@
 
 <div id="toast" class="toast" aria-live="polite" aria-atomic="true"></div>
 
+<!-- Vendors -->
+<script defer src="vendor/zxing-wasm-reader.iife.js"></script>
+<script defer>
+window.addEventListener('DOMContentLoaded', function(){
+  if(window.ZXingBrowser && ZXingBrowser.setZXingModuleOverrides){
+    ZXingBrowser.setZXingModuleOverrides({
+      locateFile: function(path, prefix){ return 'vendor/zxing_reader.wasm'; }
+    });
+  }
+});
+</script>
+<script defer src="vendor/tesseract.min.js"></script>
+<script defer src="vendor/xlsx.full.min.js"></script>
+<script defer src="vendor/jszip.min.js"></script>
 
-  <!-- Vendor libraries (deferred, ordered) -->
-  <script defer src="vendor/zxing-wasm-reader.iife.js"></script>
-  <script defer>
-  // Ensure ZXing WASM is loaded from the vendor path
-  window.addEventListener('DOMContentLoaded', function(){
-    if(window.ZXingBrowser && ZXingBrowser.setZXingModuleOverrides){
-      ZXingBrowser.setZXingModuleOverrides({
-        locateFile: function(path, prefix){ return 'vendor/zxing_reader.wasm'; }
-      });
-    }
-  });
-  </script>
-  <script defer src="vendor/jsQR.js"></script>
-  <script defer src="vendor/tesseract.min.js"></script>
-  <script defer src="vendor/xlsx.full.min.js"></script>
-  <script defer src="vendor/jszip.min.js"></script>
-
-  <script defer src="csv.js"></script>
 <script defer src="app.js"></script>
 <script defer src="sw-reg.js"></script>
 </body>
